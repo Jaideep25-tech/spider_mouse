@@ -1,125 +1,216 @@
+import 'dart:math';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:rive/rive.dart';
+import 'package:spider_mouse/spider_controller.dart';
+import 'package:spider_mouse/ui_page.dart';
 
-void main() {
-  runApp(const MyApp());
-}
+void main() => runApp(const MyApp());
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  ThemeMode _themeMode = ThemeMode.light;
+
+  void _switchTheme() {
+    if (_themeMode == ThemeMode.dark) {
+      _themeMode = ThemeMode.light;
+    } else {
+      _themeMode = ThemeMode.dark;
+    }
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Spider Mouse',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a blue toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
+        colorScheme: const ColorScheme.light(
+          primary: Colors.deepPurple,
+          secondary: Colors.deepPurple,
+        ),
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      darkTheme: ThemeData.dark().copyWith(
+        colorScheme: const ColorScheme.dark(
+          primary: Colors.deepPurple,
+          secondary: Colors.deepPurple,
+        ),
+      ),
+      themeMode: _themeMode,
+      home: SpiderMouse(
+        child: CounterPage(
+          onThemeChanged: _switchTheme,
+        ),
+      ),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
+class SpiderMouse extends StatefulWidget {
+  const SpiderMouse({
+    Key? key,
+    required this.child,
+  }) : super(key: key);
 
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+  final Widget child;
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<SpiderMouse> createState() => _SpiderMouseState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _SpiderMouseState extends State<SpiderMouse> {
+  late Ticker ticker;
 
-  void _incrementCounter() {
+  final Size _cursorSize = const Size(125, 125);
+
+  late final Artboard _artboard;
+  late final StateMachineController _stateMachineController;
+
+  late final SpiderController _spider;
+
+  final _indicatorPainter = IndicatorPainter();
+
+  var _previuosDuration = Duration.zero;
+
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _setup();
+  }
+
+  @override
+  void dispose() {
+    ticker.stop();
+    ticker.dispose();
+    _stateMachineController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _setup() async {
+    ticker = Ticker(_onTick);
+    await _setupRiveFile();
+    _spider = SpiderController(_stateMachineController);
+    ticker.start();
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      _isLoading = false;
     });
+  }
+
+  void _onTick(Duration elapsed) {
+    _spider.update((elapsed.inMicroseconds.toDouble() -
+            _previuosDuration.inMicroseconds.toDouble()) /
+        1000000.0);
+    _previuosDuration = elapsed;
+    setState(() {});
+  }
+
+  Future<void> _setupRiveFile() async {
+    // Load file
+    final file = await RiveFile.asset('assets/spider.riv');
+
+    // Get artboard
+    final artboard = file.artboardByName('Spider');
+    if (artboard == null) {
+      throw Exception('Failed to load artboard');
+    }
+    _artboard = artboard.instance();
+
+    // Get State Machine controller and attach to artboard
+    final controller =
+        StateMachineController.fromArtboard(_artboard, 'spider-machine');
+    if (controller == null) {
+      throw Exception('Failed to load state machine');
+    }
+    _stateMachineController = controller;
+    _artboard.addController(_stateMachineController);
+  }
+
+  void _setMousePosition(Offset pos) {
+    _indicatorPainter.position = pos;
+    _spider.targetPosition = pos;
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
-    return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text(
-              'You have pushed the button this many times:',
+    if (_isLoading) return const SizedBox.shrink();
+
+    final pointerOffset = _cursorSize.height / 5;
+    final dxPointer = _spider.dx -
+        (_cursorSize.width / 2) -
+        (pointerOffset * sin(_spider.rotation));
+    final dyPointer = _spider.dy -
+        (_cursorSize.height / 2) +
+        (pointerOffset * cos(_spider.rotation));
+
+    final transform = Matrix4.identity()
+      ..translate(
+        dxPointer,
+        dyPointer,
+      )
+      ..rotateZ(_spider.rotation);
+
+    return Listener(
+      onPointerMove: (event) => _setMousePosition(event.position),
+      onPointerHover: (event) => _setMousePosition(event.position),
+      onPointerDown: (event) {
+        if (event.buttons == kSecondaryMouseButton) {
+          _spider.rightClick();
+        } else {
+          _spider.leftClick();
+        }
+      },
+      child: MouseRegion(
+        cursor: SystemMouseCursors.none,
+        child: Stack(
+          children: [
+            RepaintBoundary(child: widget.child),
+            IgnorePointer(
+              child: Transform(
+                alignment: Alignment.center,
+                transform: transform,
+                child: SizedBox(
+                  width: _cursorSize.width,
+                  height: _cursorSize.height,
+                  child: Rive(
+                    artboard: _artboard,
+                  ),
+                ),
+              ),
             ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+            CustomPaint(
+              painter: _indicatorPainter,
             ),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
+  }
+}
+
+class IndicatorPainter extends CustomPainter {
+  Offset position = Offset.zero;
+
+  final _indicatorPaint = Paint()
+    ..color = Colors.black12
+    ..style = PaintingStyle.fill;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawCircle(position, 5, _indicatorPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) {
+    return true;
   }
 }
